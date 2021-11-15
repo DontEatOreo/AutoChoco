@@ -177,12 +177,12 @@
                 Environment.GetCommandLineArgs().Contains("--help"))
             {
                 Console.WriteLine("This program will install Chocolatey on your computer.\n" +
-                                  "To install Chocolatey, run the program with the argument -i --install or without any argument.\n" +
-                                  "To remove Chocolatey, run the program with the argument -r or --remove.\n" +
-                                  "To see this help text, run the program with the argument -h or --help.\n" +
+                                  "To install Chocolatey, run the program with the argument -i or --install\n" +
+                                  "To remove Chocolatey, run the program with the argument -r or --remove\n" +
+                                  "To see this help text, run the program with the argument -h or --help\n" +
                                   "To install Essential packages, run the program with the argument -e or --essential\n" +
                                   "To make a backup, run the program with the argument -b or --backup\n" +
-                                  "To restore a backup, run the program with the argument -br or --backup-restore");
+                                  "To restore a backup, run the program with the argument -br or --backup-restore.");
             }
             await Task.Delay(0);
         }
