@@ -21,7 +21,8 @@
                 Console.ForegroundColor = ConsoleColor.Red;
                 Console.WriteLine("You need to run the program with arguments");
                 Console.ForegroundColor = ConsoleColor.Gray;
-                Thread.Sleep(1200);
+                Thread.Sleep(2500);
+                Environment.Exit(0);
             }
             await ChocoInstallTask();
             await ChocoInstallEssential();
@@ -182,7 +183,7 @@
                                   "To see this help text, run the program with the argument -h or --help\n" +
                                   "To install Essential packages, run the program with the argument -e or --essential\n" +
                                   "To make a backup, run the program with the argument -b or --backup\n" +
-                                  "To restore a backup, run the program with the argument -br or --backup-restore.");
+                                  "To restore a backup, run the program with the argument -br or --backup-restore");
             }
             await Task.Delay(0);
         }
