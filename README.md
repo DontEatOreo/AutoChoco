@@ -1,5 +1,5 @@
 # AutoChoco
-C# Program which Automates Installation, Uninstallation, Backup, Backup Restore and Essential Package Installation for Chocolatey
+C# Program which Automates Chocolatey Installation, Uninstallation, Backup, and more.
 
 # Usage
 **Installing Chocolatey:**
@@ -24,24 +24,34 @@ C# Program which Automates Installation, Uninstallation, Backup, Backup Restore 
 
 
 # List of Essential Programs:
-- 7Zip
-- Chromium
-- DotNet 3.5
-- DotNet Runtime
-- FFmpeg
+## Browsers
 - Firefox
-- MPV.Net
-- OBS
-- OnlyOffice
+- Chromium
+## Media
 - VLC
-- VSCode
-- yt-dlp
+- MPV.NET
+- OBS Studio
+- FFmpeg
+- YT-DLP
+## Development
+- Visual Studio Code
+- Neovim
+- Dotnet Runtime
+- Dotnet Framework 4.8
+- DotNet Framework 3.5
+- Python 3.10
+- Git
+- Less
+## Other
+- 7zip
+- OnlyOffice
 
 # How do I run AutoChocolatey?
-You can run the program using `dotnet run -- <option>` or by using [dotnet publish](https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-publish).
-You can also download a compiled binary from [releases](https://github.com/DontEatOreo/AutoChoco/releases)
+You can run the program using `dotnet run -- <option>`, by using [dotnet publish](https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-publish) or you can also download a compiled binary from [releases](https://github.com/DontEatOreo/AutoChoco/releases)
 
 # Nuget Packages
 ```
+CliWrap
+Pastel
 System.CommandLine
 ```

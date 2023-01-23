@@ -1,7 +1,39 @@
 ﻿using System.CommandLine;
 using System.CommandLine.Invocation;
-using System.Diagnostics;
 using System.Security.Principal;
+using System.Text;
+using System.Text.RegularExpressions;
+using CliWrap;
+using Pastel;
+
+var programFiles = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+var chocolateyPath = Path.Combine(programFiles, "chocolatey");
+var chocolateyBackupPath = Path.Combine(programFiles, "chocolatey-backup");
+var restorePackagesPath = Path.Combine(chocolateyBackupPath, "packages.txt");
+
+string[] defaultEssentialPrograms = {
+    // Browsers
+    "firefox",
+    "chromium",
+    // Media
+    "vlc",
+    "mpv.net",
+    "obs",
+    "ffmpeg",
+    "yt-dlp",
+    // Development
+    "vscode",
+    "neovim",
+    "dotnet-runtime",
+    "dotnetfx",
+    "dotnet3.5",
+    "python310",
+    "git",
+    "less",
+    // Other
+    "7zip",
+    "onlyoffice",
+};
 
 RootCommand rootCommand = new();
 
@@ -9,32 +41,35 @@ Option<bool> installOption = new(new[] { "-i", "--install" }, "Install Chocolate
 Option<bool> uninstallOption = new(new[] { "-u", "--uninstall" }, "Uninstall Chocolatey");
 Option<bool> essentialOption = new(new[] { "-e", "--essentials" }, "Install essential packages");
 Option<bool> backupOption = new(new[] { "-b", "--backup" }, "Make a backup");
+backupOption.AddValidator(_ =>
+{
+    if (!Directory.Exists(chocolateyBackupPath))
+        return;
+    Console.Write($"{"There is already a backup".Pastel(ConsoleColor.Red)}");
+    Environment.Exit(1);
+});
 Option<bool> restoreOption = new(new[] { "-r", "--backup-restore" }, "Restore a backup");
 
-foreach(var option in new[] { installOption, uninstallOption, essentialOption, backupOption, restoreOption }) 
+var options = new[] { installOption, uninstallOption, essentialOption, backupOption, restoreOption };
+foreach (var option in options)
     rootCommand.AddOption(option);
 
-rootCommand.SetHandler(async context => await ChocoHandler(context));
+if (string.IsNullOrEmpty(args.ToString()))
+    args = new[] { "-h" };
 
-await rootCommand.InvokeAsync(args);
+rootCommand.SetHandler(ChocoHandler);
 
 async Task ChocoHandler(InvocationContext invocationContext)
 {
-    #pragma warning disable CA1416
-    if(!new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator))
-    #pragma warning restore CA1416
-    {
-        Console.ForegroundColor = ConsoleColor.Red;
-        Console.WriteLine("You need to run this program as administrator");
-        Console.ResetColor();
-        return;
-    }
-    
     var install = invocationContext.ParseResult.GetValueForOption(installOption);
     var uninstall = invocationContext.ParseResult.GetValueForOption(uninstallOption);
     var essential = invocationContext.ParseResult.GetValueForOption(essentialOption);
     var backup = invocationContext.ParseResult.GetValueForOption(backupOption);
     var restore = invocationContext.ParseResult.GetValueForOption(restoreOption);
+
+    var isAdmin = await CheckAdmin();
+    if (!isAdmin)
+        Environment.Exit(1);
 
     if (install) await InstallChoco();
     else if (uninstall) await UninstallChoco();
@@ -43,127 +78,172 @@ async Task ChocoHandler(InvocationContext invocationContext)
     else if (restore) await RestoreChoco();
 }
 
+Task<bool> CheckAdmin()
+{
+#pragma warning disable CA1416
+    var identity = WindowsIdentity.GetCurrent();
+    var principal = new WindowsPrincipal(identity);
+    if (principal.IsInRole(WindowsBuiltInRole.Administrator))
+        return Task.FromResult(true);
+#pragma warning restore CA1416
+
+    Console.Error.WriteLine($"{"You need to run this program as administrator".Pastel(ConsoleColor.Red)}");
+    return Task.FromResult(false);
+}
+
 async Task InstallChoco()
 {
-    if(Directory.Exists(@"C:\ProgramData\chocolatey"))
-    {
-        Console.ForegroundColor = ConsoleColor.Yellow;
-        Console.WriteLine("Chocolatey is already installed");
-        Console.ResetColor();
-        return;
-    }
-    
-    var process = new Process
-    {
-        StartInfo = new ProcessStartInfo
-        {
-            FileName = @"powershell.exe",
-            Arguments =
-                @"Set-ExecutionPolicy Bypass -Scope Process -Force; iex ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'))",
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            CreateNoWindow = false
-        }
-    };
-    process.Start();
-    var output = await process.StandardOutput.ReadToEndAsync();
-    Console.WriteLine(output);
+    const string installArgs =
+        @"Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))";
+    await Cli.Wrap("powershell")
+        .WithArguments(installArgs)
+        .WithValidation(CommandResultValidation.None)
+        .ExecuteAsync();
+
+    Console.WriteLine($"{"Chocolatey has been installed".Pastel(ConsoleColor.Green)}");
+
+    Console.WriteLine("Do you want to install the essential packages? (y/n)");
+    var key = Console.ReadKey();
+    if (key.Key is ConsoleKey.Y)
+        await InstallEssentials();
 }
 
 async Task InstallEssentials()
 {
-    var process = new Process
+    await Cli.Wrap("choco")
+        .WithArguments($"{string.Join(' ', defaultEssentialPrograms)} -y")
+        .WithValidation(CommandResultValidation.ZeroExitCode)
+        .WithStandardOutputPipe(PipeTarget.ToDelegate(Console.WriteLine))
+        .WithStandardErrorPipe(PipeTarget.ToDelegate(line => Console.Error.WriteLine(line.Pastel(ConsoleColor.Red))))
+        .ExecuteAsync();
+
+    Console.WriteLine($"{"The Essential packages have been installed".Pastel(ConsoleColor.Green)}");
+
+    Console.WriteLine("Do you want to install additional packages? (y/n)");
+    var key = Console.ReadKey();
+    if (key.Key is not ConsoleKey.Y)
+        return;
+
+    Console.WriteLine("Enter the packages you want to install separated by a space");
+    var packages = Console.ReadLine()?.Split(' ');
+    if (packages is null)
     {
-        StartInfo = new ProcessStartInfo
-        {
-            FileName = @"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
-            Arguments =
-                @"choco install 7zip chromium dotnet-runtime dotnet3.5 ffmpeg firefox mpv.net obs onlyoffice vlc vscode yt-dlp -y",
-            RedirectStandardOutput = true,
-        }
-    };
-    process.Start();
-    var output = await process.StandardOutput.ReadToEndAsync();
-    Console.WriteLine(output);
-    Console.ForegroundColor = ConsoleColor.Green;
-    Console.WriteLine("The Essential packages have been installed");
-    Console.ResetColor();
+        Console.Error.WriteLine($"{"No packages were entered".Pastel(ConsoleColor.Red)}");
+        return;
+    }
+
+    await Cli.Wrap("choco")
+        .WithArguments($"{packages} -y")
+        .WithValidation(CommandResultValidation.None)
+        .WithStandardErrorPipe(PipeTarget.ToDelegate(line => Console.Error.WriteLine(line.Pastel(ConsoleColor.Red))))
+        .ExecuteAsync();
 }
 
-Task UninstallChoco()
+async Task UninstallChoco()
 {
-    if (Directory.Exists(@"C:\ProgramData\chocolatey\")) Directory.Delete(@"C:\ProgramData\chocolatey\", true);
-    Console.ForegroundColor = Directory.Exists(@"C:\ProgramData\chocolatey\") ? ConsoleColor.Red : ConsoleColor.Green;
-    Console.WriteLine(Directory.Exists(@"C:\ProgramData\chocolatey\") ? "Chocolatey is not installed." : "Chocolatey has been removed.");
-    Console.ResetColor();
-    return Task.CompletedTask;
+    await Cli.Wrap("choco")
+        .WithArguments("uninstall all -y")
+        .WithValidation(CommandResultValidation.None)
+        .WithStandardOutputPipe(PipeTarget.ToDelegate(Console.WriteLine))
+        .ExecuteAsync();
+
+    if (Directory.Exists(chocolateyPath))
+        Directory.Delete(chocolateyPath, true);
+
+    Console.WriteLine(Directory.Exists(chocolateyPath)
+        ? $"{"Chocolatey is not installed.".Pastel(ConsoleColor.Red)}"
+        : $"{"Chocolatey has been removed.".Pastel(ConsoleColor.Green)}");
 }
 
-Task BackUpChoco()
+async Task BackUpChoco()
 {
-    if (!Directory.Exists(@"C:\ProgramData\chocolatey\"))
+    if (!Directory.Exists(chocolateyPath))
     {
-        Console.ForegroundColor = ConsoleColor.Red;
-        Console.WriteLine("Chocolatey is not installed.");
-        Console.ResetColor();
-        return Task.CompletedTask;
+        Console.WriteLine($"{"Chocolatey is not installed.".Pastel(ConsoleColor.Red)}");
+        return;
     }
-    
-    // check if there is an existing backup
-    if (Directory.Exists(@"C:\ProgramData\chocolatey-backup\"))
+
+    if (Directory.Exists(chocolateyBackupPath))
     {
-        Console.ForegroundColor = ConsoleColor.Yellow;
-        Console.WriteLine("There is already a backup.");
-        Console.ResetColor();
-        return Task.CompletedTask;
+        Console.WriteLine($"{"There is already a backup.".Pastel(ConsoleColor.Yellow)}");
+        return;
     }
-    
-    Directory.CreateDirectory(@"C:\ProgramData\chocolatey-backup\");
-    
-    var files = Directory.GetFiles(@"C:\ProgramData\chocolatey\", "*", SearchOption.AllDirectories);
+
+    Directory.CreateDirectory(chocolateyBackupPath);
+
+    var files = Directory.GetFiles(chocolateyPath, "*", SearchOption.AllDirectories);
     foreach (var file in files)
     {
-        var newFile = file.Replace(@"C:\ProgramData\chocolatey\", @"C:\ProgramData\chocolatey-backup\");
+        var newFile = file.Replace(chocolateyPath, chocolateyBackupPath);
         Directory.CreateDirectory(Path.GetDirectoryName(newFile) ?? string.Empty);
         File.Copy(file, newFile, true);
     }
 
-    Console.ForegroundColor = ConsoleColor.Green;
-    Console.WriteLine("Backup complete.");
-    Console.ResetColor();
-    return Task.CompletedTask;
+    StringBuilder packages = new();
+    await Cli.Wrap("choco")
+        .WithArguments("list --local-only")
+        .WithStandardOutputPipe(PipeTarget.ToStringBuilder(packages))
+        .ExecuteAsync();
+
+    var lines = packages.ToString().Split(Environment.NewLine);
+    var start = Array.FindIndex(lines, line => line.StartsWith("Chocolatey v"));
+    var end = Array.FindIndex(lines, line => line.EndsWith("packages installed."));
+    var packagesList = lines[start..end];
+    packagesList = packagesList[2..];
+    var regex = new Regex(@"\s");
+    packagesList = packagesList.Select(line => regex.Split(line)[0]).ToArray();
+    Console.WriteLine(string.Join(" ", packagesList));
+    File.WriteAllText(restorePackagesPath, string.Join(" ", packagesList));
+
+    Console.WriteLine($"{"Backup complete.".Pastel(ConsoleColor.Green)}");
 }
 
-Task RestoreChoco()
+async Task RestoreChoco()
 {
-    if (!Directory.Exists(@"C:\ProgramData\chocolatey-backup\"))
+    if (!Directory.Exists(chocolateyBackupPath))
     {
-        Console.ForegroundColor = ConsoleColor.Red;
-        Console.WriteLine("No backup found.");
-        Console.ResetColor();
-        return Task.CompletedTask;
+        Console.Error.WriteLine($"{"No backup found.".Pastel(ConsoleColor.Red)}");
+        return;
     }
-    
-    // copy files from chocolatey-backup to chocolatey
-    var files = Directory.GetFiles(@"C:\ProgramData\chocolatey-backup\", "*", SearchOption.AllDirectories);
+
+    var files = Directory.GetFiles(chocolateyBackupPath, "*", SearchOption.AllDirectories);
+    var directories = Directory.GetDirectories(chocolateyBackupPath, "*", SearchOption.AllDirectories);
+    Console.WriteLine($"{"Restoring Directory Structure...".Pastel(ConsoleColor.Gray)}");
+    foreach (var directory in directories)
+    {
+        if (Directory.Exists(directory))
+            continue;
+        var newDirectory = directory.Replace(chocolateyBackupPath, chocolateyPath);
+        Directory.CreateDirectory(newDirectory);
+    }
+    Console.WriteLine($"{"Restoring Files...".Pastel(ConsoleColor.Green)}");
     foreach (var file in files)
     {
-        var newFile = file.Replace(@"C:\ProgramData\chocolatey-backup\", @"C:\ProgramData\chocolatey\");
-        Directory.CreateDirectory(Path.GetDirectoryName(newFile) ?? string.Empty);
-        File.Copy(file, newFile, true);
+        if (File.Exists(file))
+            continue;
+        var newFile = file.Replace(chocolateyBackupPath, chocolateyPath);
+        File.Move(file, newFile);
     }
-    
-    Console.ForegroundColor = ConsoleColor.Green;
-    Console.WriteLine("Backup restored complete.");
-    Console.ResetColor();
-    
-    // Ask if a user wants to delete the backup
+
+    if (File.Exists(restorePackagesPath))
+    {
+        var packages = File.ReadAllText(restorePackagesPath);
+        packages = packages.Replace(Environment.NewLine, " ");
+        Console.WriteLine($"{"Restoring Packages...".Pastel(ConsoleColor.Green)}");
+        await Cli.Wrap("choco")
+            .WithArguments($"install {packages} -y")
+            .WithValidation(CommandResultValidation.None)
+            .ExecuteAsync();
+    }
+
+    Console.WriteLine($"{"Backup restored.".Pastel(ConsoleColor.Green)}");
+
     Console.WriteLine("Do you want to delete the backup? (y/n)");
-    var input = Console.ReadLine();
-    if (input == "y") Directory.Delete(@"C:\ProgramData\chocolatey-backup\", true);
-    Console.ForegroundColor = input == "y" ? ConsoleColor.Green : ConsoleColor.Yellow;
-    Console.WriteLine(input == "y" ? "Backup deleted." : "Backup not deleted.");
-    Console.ResetColor();
-    
-    return Task.CompletedTask;
+    var key = Console.ReadKey();
+    if (key.Key is not ConsoleKey.Y)
+        return;
+    Directory.Delete(chocolateyBackupPath, true);
+    Console.WriteLine($"{"Backup deleted.".Pastel(ConsoleColor.Green)}");
 }
+
+await rootCommand.InvokeAsync(args);
